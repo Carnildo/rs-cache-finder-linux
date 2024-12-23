@@ -1,2 +1,5 @@
 # rs-cache-finder-linux
-A tool to look for Runescape cache files on Linux
+A Linux tool to look for Runescape cache files on either Windows or Linux disks.  Written to assist the Runescape Archive Project: https://rs-archive.github.io/
+
+To compile, simply run `make`.
+
