@@ -280,13 +280,27 @@ void addCacheDir(const std::filesystem::path &source, FILE *outfile, int verbose
 {
 	gDirCounter++;
 	std::string prefix = makePrefix(source);
-	for(auto const &item : std::filesystem::directory_iterator(source, std::filesystem::directory_options::skip_permission_denied))
+	try
 	{
-		if(item.is_regular_file())
+		for(auto const &item : std::filesystem::directory_iterator(source, std::filesystem::directory_options::skip_permission_denied))
 		{
-			printf("Adding file %s to archive\n", item.path().c_str());
-			addFileToTar(item.path(), prefix, outfile, verbose);
+			try
+			{
+				if(item.is_regular_file())
+				{
+					printf("Adding file %s to archive\n", item.path().c_str());
+					addFileToTar(item.path(), prefix, outfile, verbose);
+				}
+			}
+			catch(std::filesystem::filesystem_error &e)
+			{
+				fprintf(stderr, "Error processing cache file %s: %s\n", e.path1().c_str(), e.what());
+			}
 		}
+	}
+	catch(std::filesystem::filesystem_error &e)
+	{
+		fprintf(stderr, "Error processing cache directory %s: %s\n", e.path1().c_str(), e.what());
 	}
 }
 
@@ -296,55 +310,83 @@ void addCacheFiles(const std::filesystem::path &source, FILE *outfile, int verbo
 {
 	bool foundCacheFile = false;
 	std::string prefix;
-	for(auto const &item : std::filesystem::directory_iterator(source, std::filesystem::directory_options::skip_permission_denied))
+	try
 	{
-		if(item.is_symlink())
+		for(auto const &item : std::filesystem::directory_iterator(source, std::filesystem::directory_options::skip_permission_denied))
 		{
-			continue;
-		}
-		if(item.is_regular_file() && searchRegexes(item.path().filename().string(), cacheRegexes))
-		{
-			printIfVerbose(verbose, "Cache file match: %s\n", item.path().c_str());
-			printf("Adding file %s to archive\n", item.path().c_str());
-			if(!foundCacheFile)
+			try
 			{
-				gDirCounter++;
-				foundCacheFile = true;
-				prefix = makePrefix(source);
+				if(item.is_symlink())
+				{
+					continue;
+				}
+				if(item.is_regular_file() && searchRegexes(item.path().filename().string(), cacheRegexes))
+				{
+					printIfVerbose(verbose, "Cache file match: %s\n", item.path().c_str());
+					printf("Adding file %s to archive\n", item.path().c_str());
+					if(!foundCacheFile)
+					{
+						gDirCounter++;
+						foundCacheFile = true;
+						prefix = makePrefix(source);
+					}
+					addFileToTar(item.path(), prefix, outfile, verbose);
+				}
 			}
-			addFileToTar(item.path(), prefix, outfile, verbose);
+			catch(std::filesystem::filesystem_error &e)
+			{
+				fprintf(stderr, "Error processing file %s: %s\n", e.path1().c_str(), e.what());
+			}
 		}
+	}
+	catch(std::filesystem::filesystem_error &e)
+	{
+		fprintf(stderr, "Error processing directory %s: %s\n", e.path1().c_str(), e.what());
 	}
 }
 
 void scanPath(const std::filesystem::path &source, FILE *outfile, int verbose)
 {
 	printIfVerbose(verbose, "Scanning %s\n", source.c_str());
-	for(auto const &dir : std::filesystem::directory_iterator(source, std::filesystem::directory_options::skip_permission_denied))
+	try
 	{
-		if(dir.is_directory())
+		for(auto const &dir : std::filesystem::directory_iterator(source, std::filesystem::directory_options::skip_permission_denied))
 		{
-			if(dir.is_symlink())
+			try
 			{
-				printIfVerbose(verbose, "Skipping directory symlink %s\n", dir.path().c_str());
-				continue;
+				if(dir.is_directory())
+				{
+					if(dir.is_symlink())
+					{
+						printIfVerbose(verbose, "Skipping directory symlink %s\n", dir.path().c_str());
+						continue;
+					}
+					else if(searchRegexes(dir.path().filename().string(), cacheExcludeRegexes))
+					{
+						printIfVerbose(verbose, "Excluding directory %s\n", dir.path().c_str());
+						continue;
+					}
+					else if(isCacheDir(dir.path(), verbose))
+					{
+						printIfVerbose(verbose, "Cache dir found: %s\n", dir.path().c_str());
+						addCacheDir(dir.path(), outfile, verbose);
+					}
+					else
+					{
+						addCacheFiles(dir.path(), outfile, verbose);
+					}
+					scanPath(dir.path(), outfile, verbose);
+				}
 			}
-			else if(searchRegexes(dir.path().filename().string(), cacheExcludeRegexes))
+			catch(std::filesystem::filesystem_error &e)
 			{
-				printIfVerbose(verbose, "Excluding directory %s\n", dir.path().c_str());
-				continue;
+				fprintf(stderr, "Error processing entry %s: %s\n", e.path1().c_str(), e.what());
 			}
-			else if(isCacheDir(dir.path(), verbose))
-			{
-				printIfVerbose(verbose, "Cache dir found: %s\n", dir.path().c_str());
-				addCacheDir(dir.path(), outfile, verbose);
-			}
-			else
-			{
-				addCacheFiles(dir.path(), outfile, verbose);
-			}
-			scanPath(dir.path(), outfile, verbose);
 		}
+	}
+	catch(std::filesystem::filesystem_error &e)
+	{
+		fprintf(stderr, "Error scanning directory %s: %s\n", e.path1().c_str(), e.what());
 	}
 }
 
